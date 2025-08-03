@@ -1,0 +1,1 @@
+# Authentication module for Buddy AI Agent
