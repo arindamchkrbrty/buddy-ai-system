@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -119,6 +119,7 @@ async def chat(request: ChatRequest, http_request: Request):
 
 @app.post("/siri-chat")
 async def siri_chat(request: ChatRequest, http_request: Request):
+    """Enhanced Siri-optimized endpoint with voice processing."""
     try:
         # Extract headers for iPhone device authentication
         headers = dict(http_request.headers)
@@ -130,50 +131,35 @@ async def siri_chat(request: ChatRequest, http_request: Request):
         access_info = access_controller.check_message_access(auth_result, request.message)
         
         if not access_info["allowed"]:
-            # Use cinematic response for Siri
-            cinematic_response = access_info.get("cinematic_response", "Authentication required. Please use the passphrase.")
-            return {"speak": cinematic_response}
+            # Use cinematic response for Siri, optimized for voice
+            cinematic_response = access_info.get("cinematic_response", "Authentication required. Please say happy birthday.")
+            clean_response = buddy.voice_processor.optimize_for_voice(cinematic_response)
+            return {"speak": clean_response}
         
         # Check for admin commands
         admin_response = access_controller.process_admin_command(auth_result, request.message)
         if admin_response:
-            return {"speak": admin_response}
+            clean_admin_response = buddy.voice_processor.optimize_for_voice(admin_response)
+            return {"speak": clean_admin_response}
         
-        # Process normal message with sophisticated conversation flow
-        response = await buddy.process_message(request.message, auth_result.user_id, auth_result)
+        # Process voice-optimized message with sophisticated conversation flow
+        headers = dict(http_request.headers)
+        is_iphone = buddy.voice_processor.is_iphone_request(headers)
         
-        # Check if response already came from conversation manager or self-improvement
-        is_special_response = any(phrase in response for phrase in [
-            "Welcome back, Arindam", "daily briefing", "Session expired", 
-            "Would you like me to give you your daily briefing", "I'd love to improve",
-            "Analysis Complete", "Implementation Plan", "Improvement Complete"
-        ])
+        response = await buddy.process_message(
+            request.message, 
+            auth_result.user_id, 
+            auth_result, 
+            is_voice=True, 
+            headers=headers
+        )
         
-        if is_special_response:
-            # Use special response directly for Siri (clean up debug info)
-            clean_response = response.split(" [Session:")[0]  # Remove debug info
-            return {"speak": clean_response}
-        else:
-            # Filter response for voice - no auth prefixes for Siri
-            filtered_response = access_controller.filter_response_for_access_level(response, auth_result)
-            
-            # Add cinematic authentication confirmation for voice
-            if auth_result.authenticated and auth_result.method == "cinematic_passphrase":
-                filtered_response = "Welcome back, Arindam. All systems are now at your command. " + filtered_response
-            elif auth_result.authenticated and auth_result.method == "jwt_token":
-                # Get time-based greeting
-                current_hour = datetime.now().hour
-                if current_hour < 12:
-                    greeting = "morning"
-                elif current_hour < 17:
-                    greeting = "afternoon"
-                else:
-                    greeting = "evening"
-                filtered_response = f"Good {greeting}, {auth_result.user_id}. " + filtered_response
-            
-            return {"speak": filtered_response}
+        # Response is already optimized for voice in buddy.process_message
+        return {"speak": response}
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_response = buddy.voice_processor.create_voice_confirmation("error")
+        return {"speak": error_response}
 
 @app.get("/personality")
 async def get_personality(http_request: Request):
@@ -221,6 +207,43 @@ async def get_improvements(http_request: Request):
         "status": buddy.self_improvement.get_improvement_status(),
         "history": buddy.self_improvement.get_improvement_history()
     }
+
+@app.post("/voice")
+async def voice_endpoint(message: str = Form(...), user_id: str = Form("Arindam"), http_request: Request = None):
+    """Plain text endpoint for direct voice integration (alternative to JSON)."""
+    try:
+        # Convert to ChatRequest format
+        request = ChatRequest(message=message, user_id=user_id)
+        
+        # Use the same logic as siri_chat
+        headers = dict(http_request.headers)
+        auth_result = auth_manager.authenticate_request(headers, request.message, request.user_id)
+        
+        access_info = access_controller.check_message_access(auth_result, request.message)
+        
+        if not access_info["allowed"]:
+            cinematic_response = access_info.get("cinematic_response", "Authentication required. Please say happy birthday.")
+            clean_response = buddy.voice_processor.optimize_for_voice(cinematic_response)
+            return {"response": clean_response}
+        
+        admin_response = access_controller.process_admin_command(auth_result, request.message)
+        if admin_response:
+            clean_admin_response = buddy.voice_processor.optimize_for_voice(admin_response)
+            return {"response": clean_admin_response}
+        
+        response = await buddy.process_message(
+            request.message, 
+            auth_result.user_id, 
+            auth_result, 
+            is_voice=True, 
+            headers=headers
+        )
+        
+        return {"response": response}
+        
+    except Exception as e:
+        error_response = buddy.voice_processor.create_voice_confirmation("error")
+        return {"response": error_response}
 
 if __name__ == "__main__":
     uvicorn.run(

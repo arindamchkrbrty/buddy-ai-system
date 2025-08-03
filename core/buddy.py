@@ -8,6 +8,7 @@ from providers.memory_provider import MemoryProvider
 from config.settings import settings
 from .conversation_manager import ConversationManager
 from .self_improvement import SelfImprovementManager
+from .voice_processor import VoiceProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class Buddy:
         self.memory_provider: Optional[MemoryProvider] = None
         self.conversation_manager = ConversationManager()
         self.self_improvement = SelfImprovementManager()
+        self.voice_processor = VoiceProcessor()
         
         self._initialize_providers()
     
@@ -66,24 +68,41 @@ class Buddy:
             except Exception as e:
                 logger.error(f"Error initializing AI provider: {e}")
     
-    async def process_message(self, message: str, user_id: str = "default", auth_result = None) -> str:
+    async def process_message(self, message: str, user_id: str = "default", auth_result = None, is_voice: bool = False, headers: Dict = None) -> str:
         try:
+            # Clean voice input if this is a voice request
+            if is_voice and headers:
+                original_message = message
+                message = self.voice_processor.clean_voice_input(message)
+                
+                # Detect voice command type for better processing
+                command_type = self.voice_processor.detect_voice_command_type(message)
+                logger.info(f"Voice command detected: {command_type} | Original: '{original_message}' | Cleaned: '{message}'")
+            
             # First check self-improvement flow
             improvement_response = self.self_improvement.check_improvement_trigger(message, user_id)
             if improvement_response:
+                if is_voice:
+                    improvement_response = self.voice_processor.optimize_for_voice(improvement_response)
                 return improvement_response
             
             # Check if in improvement flow
             improvement_flow_response = self.self_improvement.process_improvement_request(message, user_id)
             if improvement_flow_response:
+                if is_voice:
+                    improvement_flow_response = self.voice_processor.optimize_for_voice(improvement_flow_response)
                 return improvement_flow_response
             
             # Then check sophisticated conversation flow
             conversation_response = self.conversation_manager.process_conversation_flow(message, user_id)
             if conversation_response:
-                # Add session debug info for development
-                debug_info = self.conversation_manager.get_session_debug_info(user_id)
-                return conversation_response + debug_info
+                if is_voice:
+                    conversation_response = self.voice_processor.optimize_for_voice(conversation_response)
+                else:
+                    # Add session debug info for development (not for voice)
+                    debug_info = self.conversation_manager.get_session_debug_info(user_id)
+                    conversation_response += debug_info
+                return conversation_response
             
             context = await self._get_context(user_id)
             
@@ -116,9 +135,15 @@ class Buddy:
             
             final_response = self._apply_personality_to_response(response)
             
-            # Add session debug info for development
-            debug_info = self.conversation_manager.get_session_debug_info(user_id)
-            return final_response + debug_info
+            # Optimize for voice if needed
+            if is_voice:
+                final_response = self.voice_processor.optimize_for_voice(final_response)
+            else:
+                # Add session debug info for development (not for voice)
+                debug_info = self.conversation_manager.get_session_debug_info(user_id)
+                final_response += debug_info
+            
+            return final_response
             
         except Exception as e:
             logger.error(f"Error processing message: {e}")
