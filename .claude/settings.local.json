@@ -9,7 +9,13 @@
       "Bash(grep:*)",
       "Bash(cp:*)",
       "Bash(mv:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(pkill:*)",
+      "Bash(curl:*)",
+      "Bash(lsof:*)",
+      "Bash(nc:*)",
+      "Bash(sudo:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }

@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -23,13 +24,22 @@ app = FastAPI(
 )
 
 # Configure CORS middleware to allow cross-origin requests
-# This enables web clients and mobile apps to communicate with the API
+# This enables web clients, mobile apps, and iPhone network requests
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development (restrict in production)
+    allow_origins=["*"],  # Allow all origins including network clients
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all HTTP methods
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],  # Allow all HTTP methods (GET, POST, OPTIONS, etc.)
+    allow_headers=["*"],  # Allow all headers including custom iPhone headers
+    expose_headers=["*"],  # Expose all response headers to clients
+    allow_origin_regex=r"https?://.*",  # Allow any HTTP/HTTPS origin for network access
+)
+
+# Configure trusted host middleware for network access
+# Note: Some network configurations may require disabling this for debugging
+app.add_middleware(
+    TrustedHostMiddleware, 
+    allowed_hosts=["*"]  # Allow all hosts for network access (customize for production)
 )
 
 # Initialize core application components
@@ -547,7 +557,7 @@ if __name__ == "__main__":
     for development.
     
     Server Configuration:
-        - Host: Configurable via settings.HOST (default: localhost)
+        - Host: Configurable via settings.HOST (default: 0.0.0.0 for network access)
         - Port: Configurable via settings.PORT (default: 8000)
         - Reload: Enabled when settings.DEBUG is True
         
@@ -555,7 +565,8 @@ if __name__ == "__main__":
         python main.py
         
     Access Points:
-        - Web API: http://localhost:8000
+        - Web API: http://0.0.0.0:8000 (accessible from iPhone/network)
+        - Local access: http://localhost:8000
         - Docs: http://localhost:8000/docs
         - Health: http://localhost:8000/health
     """
@@ -563,9 +574,13 @@ if __name__ == "__main__":
     logger.info(f"Debug mode: {settings.DEBUG}")
     logger.info("Available endpoints: /chat, /siri-chat, /voice, /personality")
     
+    # Configure uvicorn for network access with optimal settings
     uvicorn.run(
-        "main:app",
-        host=settings.HOST,
+        app,  # Direct app object for better performance and reliability
+        host=settings.HOST,  # 0.0.0.0 allows iPhone network access
         port=settings.PORT,
-        reload=settings.DEBUG
+        reload=settings.DEBUG,
+        access_log=True,  # Enable access logging for network debugging
+        server_header=False,  # Remove server header for security
+        date_header=False,  # Remove date header for performance
     )
