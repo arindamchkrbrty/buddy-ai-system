@@ -29,7 +29,21 @@ class AuthResult:
             self.timestamp = datetime.now().isoformat()
 
 class AuthenticationManager:
-    """Manages iPhone device authentication and voice passphrase system."""
+    """Manages multi-layered authentication system for Buddy AI Agent.
+    
+    **Authentication Methods (Priority Order):**
+    1. **Session Token Authentication**: JWT tokens from previous successful logins
+    2. **Voice Passphrase Authentication**: \"Happy birthday\" cinematic trigger
+    3. **iPhone Device Authentication**: Whitelisted iPhone User-Agent patterns
+    4. **Guest Access**: Default unknown user role
+    
+    **Security Features:**
+    - JWT session tokens with 24-hour expiry
+    - iPhone device fingerprinting and whitelisting
+    - Voice passphrase pattern matching with flexible recognition
+    - Comprehensive authentication logging and attempt tracking
+    - Session management with automatic cleanup
+    """
     
     def __init__(self):
         self.master_user = "Arindam"

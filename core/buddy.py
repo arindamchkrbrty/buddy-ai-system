@@ -13,7 +13,41 @@ from .voice_processor import VoiceProcessor
 logger = logging.getLogger(__name__)
 
 class Buddy:
+    """Main AI agent class that orchestrates conversation, authentication, and system features.
+    
+    Buddy is the central coordinator that integrates:
+    - AI conversation processing (HuggingFace DialoGPT or fallback responses)
+    - Voice processing pipeline for iPhone/Siri integration
+    - Sophisticated conversation management with time-based greetings
+    - Self-improvement system for code modification
+    - Authentication integration and session management
+    
+    **Core Capabilities:**
+    - Natural conversation with personality-driven responses
+    - Daily briefing system with time-aware greetings
+    - Voice command processing and optimization
+    - Self-modification and improvement workflows
+    - Multi-provider AI backend support
+    - Memory and context management
+    
+    **Processing Flow:**
+    1. Self-improvement trigger check
+    2. Conversation manager (greetings, briefings, sessions)
+    3. AI provider processing (HuggingFace or fallback)
+    4. Voice optimization (if voice request)
+    5. Personality application and response formatting
+    """
+    
     def __init__(self):
+        """Initialize Buddy with personality, providers, and processing components.
+        
+        Sets up:
+        - Personality traits and communication style
+        - AI and memory provider initialization
+        - Conversation manager for session handling
+        - Self-improvement system for code modification
+        - Voice processor for iPhone/Siri integration
+        """
         self.name = "Buddy"
         self.personality = {
             "traits": [
@@ -69,6 +103,32 @@ class Buddy:
                 logger.error(f"Error initializing AI provider: {e}")
     
     async def process_message(self, message: str, user_id: str = "default", auth_result = None, is_voice: bool = False, headers: Dict = None) -> str:
+        """Process user message through complete conversation pipeline.
+        
+        This is Buddy's main message processing method that coordinates:
+        1. Voice input cleaning (if voice request)
+        2. Self-improvement workflow checking
+        3. Conversation manager processing (greetings, briefings, sessions)
+        4. AI provider response generation
+        5. Voice optimization (if voice request)
+        6. Session debug information (if not voice)
+        
+        Args:
+            message (str): User's input message or command
+            user_id (str): User identifier for context and memory
+            auth_result: Authentication result object with user permissions
+            is_voice (bool): Whether this is a voice request requiring TTS optimization
+            headers (Dict): HTTP headers for device detection and processing
+            
+        Returns:
+            str: Processed response optimized for the request type (voice or text)
+            
+        Processing Priority:
+        1. **Self-improvement**: Checks for improvement triggers first
+        2. **Conversation flow**: Time-based greetings, briefings, session management
+        3. **AI processing**: Routes to AI provider or fallback responses
+        4. **Voice optimization**: TTS preparation for voice requests
+        """
         try:
             # Clean voice input if this is a voice request
             if is_voice and headers:
@@ -224,6 +284,12 @@ User message: {message}
                 logger.error(f"Failed to store interaction: {e}")
     
     def get_personality_info(self) -> Dict:
+        """Get comprehensive information about Buddy's personality and capabilities.
+        
+        Returns:
+            Dict: Complete personality profile including traits, capabilities,
+                  self-improvement status, and future expansion plans
+        """
         return {
             "name": self.name,
             "personality": self.personality,
@@ -252,6 +318,11 @@ User message: {message}
         }
     
     def get_status(self) -> Dict:
+        """Get current operational status of Buddy's components.
+        
+        Returns:
+            Dict: System status including provider initialization and readiness
+        """
         return {
             "name": self.name,
             "ai_provider": self.ai_provider.__class__.__name__ if self.ai_provider else "None",
