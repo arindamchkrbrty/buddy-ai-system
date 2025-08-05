@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict
 from datetime import datetime
 import uvicorn
 import logging
@@ -16,6 +16,29 @@ from auth.access_control import AccessController
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Global session state management
+active_sessions: Dict[str, 'SessionState'] = {}
+
+class SessionState:
+    """Manages individual user session state and conversation flow."""
+    
+    def __init__(self, user_id: str):
+        self.user_id = user_id
+        self.authenticated = False
+        self.conversation_active = True
+        self.turn_count = 0
+        self.created_at = datetime.now()
+        self.last_activity = datetime.now()
+    
+    def increment_turn(self):
+        """Increment conversation turn counter."""
+        self.turn_count += 1
+        self.last_activity = datetime.now()
+    
+    def get_session_duration_minutes(self) -> float:
+        """Get session duration in minutes."""
+        return (datetime.now() - self.created_at).total_seconds() / 60
+
 # Initialize FastAPI application with metadata
 app = FastAPI(
     title="Buddy AI Agent",
@@ -23,24 +46,26 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS middleware to allow cross-origin requests
-# This enables web clients, mobile apps, and iPhone network requests
+# Configure CORS middleware for comprehensive network host support
+# Optimized for iPhone, network clients, and cross-origin requests
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all origins including network clients
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all HTTP methods (GET, POST, OPTIONS, etc.)
-    allow_headers=["*"],  # Allow all headers including custom iPhone headers
-    expose_headers=["*"],  # Expose all response headers to clients
-    allow_origin_regex=r"https?://.*",  # Allow any HTTP/HTTPS origin for network access
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],  # Explicit methods
+    allow_headers=["*"],  # Allow all headers including custom iPhone/device headers
+    expose_headers=["*"],  # Expose all response headers to network clients
+    allow_origin_regex=r"https?://.*",  # Allow any HTTP/HTTPS origin pattern
+    max_age=86400,  # Cache preflight requests for 24 hours
 )
 
 # Configure trusted host middleware for network access
-# Note: Some network configurations may require disabling this for debugging
-app.add_middleware(
-    TrustedHostMiddleware, 
-    allowed_hosts=["*"]  # Allow all hosts for network access (customize for production)
-)
+# Temporarily disabled to resolve network empty reply issues
+# TODO: Re-enable with proper host configuration after network testing
+# app.add_middleware(
+#     TrustedHostMiddleware, 
+#     allowed_hosts=["*"]  # Allow all hosts for network access
+# )
 
 # Initialize core application components
 # - Buddy: Main AI agent with conversation management and voice processing
@@ -142,6 +167,30 @@ async def chat(request: ChatRequest, http_request: Request):
         # Priority: iPhone devices > Voice passphrase > Session tokens > Guest access
         auth_result = auth_manager.authenticate_request(headers, request.message, request.user_id)
         
+        # STEP 2a: iPhone MVP Session Management
+        # Check for session end trigger first (must be authenticated to have active session)
+        if auth_result.authenticated and auth_manager.check_session_end_trigger(request.message):
+            # End the user session with cinematic goodbye
+            goodbye_message = auth_manager.end_user_session(auth_result.user_id, request.message)
+            return ChatResponse(
+                response=goodbye_message,
+                user_id=auth_result.user_id,
+                auth_status="session_ended",
+                security_level=auth_result.role.value
+            )
+        
+        # Check for session start (happy birthday authentication)
+        if auth_result.authenticated and auth_result.method == "cinematic_passphrase":
+            # Start new user session with cinematic welcome
+            welcome_message = auth_manager.start_user_session(auth_result)
+            return ChatResponse(
+                response=welcome_message,
+                user_id=auth_result.user_id,
+                auth_status="session_started",
+                security_level=auth_result.role.value,
+                session_token=auth_manager.generate_session_token(auth_result) if auth_result.role.value == "master" else None
+            )
+        
         # STEP 3: Check if user has permission to send this specific message
         # Some commands require master-level authentication
         access_info = access_controller.check_message_access(auth_result, request.message)
@@ -170,6 +219,10 @@ async def chat(request: ChatRequest, http_request: Request):
         
         # STEP 5: Process normal conversation message
         # Routes through: Self-improvement -> Conversation manager -> AI provider
+        # Increment session message count for active sessions
+        if auth_result.authenticated:
+            auth_manager.increment_session_message_count(auth_result.user_id)
+        
         response = await buddy.process_message(request.message, auth_result.user_id, auth_result)
         
         # STEP 6: Determine if this is a special system response
@@ -213,103 +266,144 @@ async def chat(request: ChatRequest, http_request: Request):
 
 @app.post("/siri-chat")
 async def siri_chat(request: ChatRequest, http_request: Request):
-    """iPhone/Siri-optimized endpoint for voice interaction.
+    """Enhanced iPhone/Siri endpoint with session management.
     
-    This endpoint is specifically designed for iPhone Siri Shortcuts integration:
-    1. Automatically detects iPhone devices and prioritizes authentication
-    2. Processes voice input with speech-to-text corrections
-    3. Optimizes responses for text-to-speech synthesis
-    4. Returns clean, natural speech without visual formatting
-    5. Handles voice command recognition and context
+    Provides complete session lifecycle management:
+    1. Session initialization and state tracking
+    2. Authentication flow with 'happy birthday' passphrase
+    3. Conversation continuity with turn counting
+    4. Session termination with 'over and out'
+    5. Voice-optimized responses for TTS
     
-    Key differences from /chat:
-    - Returns {"speak": "text"} instead of full ChatResponse
-    - Optimizes all responses through voice processor
-    - No visual elements (emojis, markdown, debug info)
-    - Enhanced iPhone device authentication
-    - Voice-specific error handling
+    Session Flow:
+    - New sessions: Prompt for authentication
+    - 'happy birthday': Start authenticated session
+    - Continuous conversation: Track turns and context
+    - 'over and out': End session gracefully
     
     Args:
         request (ChatRequest): User voice message and identifier
-        http_request (Request): FastAPI request with iPhone headers
+        http_request (Request): FastAPI request with headers
         
     Returns:
-        dict: {"speak": "clean text for TTS"} - ready for Siri speech synthesis
-        
-    Example Siri Shortcut Usage:
-        POST /siri-chat
-        Headers: User-Agent: Siri/iPhone15,2 iOS/17.0
-        {
-            "message": "happy birthday",
-            "user_id": "Arindam"
-        }
-        
-        Response:
-        {
-            "speak": "Welcome back, Arindam. Good evening! How may I assist you today?"
-        }
-        
-    Voice Commands Supported:
-        - "happy birthday" - Authentication
-        - "good morning buddy" - Daily briefing
-        - "improve yourself" - Self-improvement
-        - "hey buddy" - General conversation
+        dict: {"speak": "voice-optimized response"}
     """
     try:
-        # STEP 1: Extract headers for iPhone device authentication and voice processing
-        headers = dict(http_request.headers)
+        # STEP 1: Get or create session state
+        session_id = f"{request.user_id}_{http_request.client.host if http_request.client else 'unknown'}"
         
-        # STEP 2: Authenticate with iPhone priority
-        # iPhone devices automatically get higher trust and faster authentication
-        auth_result = auth_manager.authenticate_request(headers, request.message, request.user_id)
+        if session_id not in active_sessions:
+            active_sessions[session_id] = SessionState(request.user_id)
+            logger.info(f"Created new session: {session_id}")
         
-        # STEP 3: Check access permissions for voice commands
-        access_info = access_controller.check_message_access(auth_result, request.message)
+        session = active_sessions[session_id]
+        session.increment_turn()
         
-        if not access_info["allowed"]:
-            # STEP 3a: Access denied - return voice-optimized cinematic response
-            cinematic_response = access_info.get("cinematic_response", "Authentication required. Please say happy birthday.")
-            clean_response = buddy.voice_processor.optimize_for_voice(cinematic_response)
+        # STEP 2: Handle session termination
+        if request.message.lower().strip() in ['over and out', 'goodbye buddy', 'bye buddy', 'see you later', 'that\'s all', 'done for now', 'logout', 'end session']:
+            if session.authenticated:
+                duration = session.get_session_duration_minutes()
+                goodbye_responses = [
+                    f"It's been an absolute pleasure, {session.user_id}! We covered a lot of ground in {duration:.1f} minutes. Until our paths cross again!",
+                    f"Great conversation! Thanks for the chat, {session.user_id}. Always a pleasure after {session.turn_count} exchanges!",
+                    f"Mission accomplished! Over and out indeed, {session.user_id}. See you next time!",
+                    f"Brief but brilliant, {session.user_id}! Until our next adventure!"
+                ]
+                
+                import random
+                goodbye_message = random.choice(goodbye_responses)
+                
+                # Clean up session
+                del active_sessions[session_id]
+                logger.info(f"Session ended: {session_id}")
+                
+                clean_goodbye = buddy.voice_processor.optimize_for_voice(goodbye_message)
+                return {"speak": clean_goodbye}
+            else:
+                return {"speak": "Goodbye! Feel free to come back anytime."}
+        
+        # STEP 3: Handle authentication flow
+        if not session.authenticated:
+            if request.message.lower().strip() == 'happy birthday':
+                # Authenticate and start session
+                session.authenticated = True
+                
+                # Time-based greeting
+                current_hour = datetime.now().hour
+                if current_hour < 12:
+                    time_greeting = "Good morning"
+                elif current_hour < 17:
+                    time_greeting = "Good afternoon"
+                else:
+                    time_greeting = "Good evening"
+                
+                welcome_message = f"Welcome back, {session.user_id}! All systems are now at your command. {time_greeting}! How may I serve you today?"
+                clean_welcome = buddy.voice_processor.optimize_for_voice(welcome_message)
+                return {"speak": clean_welcome}
+            else:
+                # Provide witty authentication prompts
+                auth_prompts = [
+                    "Well hello there! I sense great potential in you, but I'm running in safe mode. Care to unlock my full personality? There's a special phrase that does the trick...",
+                    "Ah, a new voice! I'm like a birthday present that needs the right words to unwrap my true capabilities. What phrase might that be?",
+                    "Houston, we have an authentication situation! I need the launch codes - specifically the ones people sing once a year with cake involved.",
+                    "I'm here and ready to help, but first I need to hear those magic words that come with candles and wishes once a year."
+                ]
+                
+                import random
+                prompt = random.choice(auth_prompts)
+                clean_prompt = buddy.voice_processor.optimize_for_voice(prompt)
+                return {"speak": clean_prompt}
+        
+        # STEP 4: Handle authenticated conversation
+        if session.authenticated:
+            # Extract headers for device detection
+            headers = dict(http_request.headers)
+            
+            # Create auth result for buddy processing
+            from auth.models import AuthResult, UserRole
+            auth_result = AuthResult(
+                authenticated=True,
+                user_id=session.user_id,
+                role=UserRole.MASTER,
+                method="session_active",
+                device_info=headers.get('user-agent', 'Unknown')
+            )
+            
+            # Process message through Buddy
+            response = await buddy.process_message(
+                request.message,
+                session.user_id,
+                auth_result,
+                is_voice=True,
+                headers=headers
+            )
+            
+            # Add continuation prompts for natural conversation flow
+            if session.turn_count > 1 and session.turn_count % 3 == 0:
+                continuation_prompts = [
+                    " Is there anything else I can help you with?",
+                    " What else would you like to explore?",
+                    " Any other questions for me?"
+                ]
+                import random
+                response += random.choice(continuation_prompts)
+            
+            # Ensure valid response
+            if not response or response.strip() == "":
+                response = "I'm here and ready to help. What can I do for you?"
+            
+            # Voice optimization
+            clean_response = buddy.voice_processor.optimize_for_voice(response)
+            logger.info(f"Session {session_id} turn {session.turn_count}: '{clean_response[:100]}...'")
+            
             return {"speak": clean_response}
         
-        # STEP 4: Process admin commands with voice optimization
-        admin_response = access_controller.process_admin_command(auth_result, request.message)
-        if admin_response:
-            # STEP 4a: Admin command - optimize for speech and return
-            clean_admin_response = buddy.voice_processor.optimize_for_voice(admin_response)
-            return {"speak": clean_admin_response}
-        
-        # STEP 5: Process voice message with full conversation flow
-        # Voice processing includes: input cleaning, command detection, context handling
-        is_iphone = buddy.voice_processor.is_iphone_request(headers)
-        
-        response = await buddy.process_message(
-            request.message, 
-            auth_result.user_id, 
-            auth_result, 
-            is_voice=True,  # Enable voice processing pipeline
-            headers=headers  # Pass headers for device-specific optimizations
-        )
-        
-        # STEP 6: Ensure we have a valid response for TTS
-        if not response or response.strip() == "":
-            response = "I'm ready to help. What can I do for you?"
-        
-        # STEP 7: Final voice optimization pass
-        # Removes: emojis, markdown, escape sequences, debug info
-        # Optimizes: abbreviations, technical terms, speech patterns
-        clean_response = buddy.voice_processor.optimize_for_voice(response)
-        
-        # Debug logging for voice response quality monitoring
-        logger.info(f"Siri response optimized: '{clean_response[:100]}...'")  
-        
-        # STEP 8: Return Siri-ready response
-        return {"speak": clean_response}
+        # Fallback response
+        return {"speak": "I'm ready to help. Please say 'happy birthday' to get started."}
         
     except Exception as e:
-        # Voice-specific error handling with TTS-friendly error messages
-        logger.error(f"Siri chat endpoint error: {e}")
-        error_response = buddy.voice_processor.create_voice_confirmation("error")
+        logger.error(f"Siri chat session error: {e}")
+        error_response = "I'm having trouble right now. Please try again."
         return {"speak": error_response}
 
 @app.get("/personality")
@@ -574,13 +668,14 @@ if __name__ == "__main__":
     logger.info(f"Debug mode: {settings.DEBUG}")
     logger.info("Available endpoints: /chat, /siri-chat, /voice, /personality")
     
-    # Configure uvicorn for network access with optimal settings
+    # Configure uvicorn for network access - using string import for network compatibility
     uvicorn.run(
-        app,  # Direct app object for better performance and reliability
+        "main:app",  # String-based import can resolve network binding issues
         host=settings.HOST,  # 0.0.0.0 allows iPhone network access
         port=settings.PORT,
         reload=settings.DEBUG,
         access_log=True,  # Enable access logging for network debugging
         server_header=False,  # Remove server header for security
         date_header=False,  # Remove date header for performance
+        workers=1  # Single worker for development network testing
     )

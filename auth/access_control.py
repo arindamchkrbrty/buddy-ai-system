@@ -66,14 +66,25 @@ class AccessController:
         return access_info
     
     def _get_cinematic_auth_prompt(self) -> str:
-        """Get cinematic authentication prompt."""
+        """
+        Get witty and engaging authentication prompt for iPhone MVP.
+        
+        Returns cinematic prompts that guide users toward the 'happy birthday' passphrase
+        without being too obvious, maintaining the mystique while being user-friendly.
+        """
         import random
         
+        # iPhone MVP-optimized witty prompts - conversational and engaging
         prompts = [
-            "🤖 I recognize your voice pattern, but I need to verify your identity. What's the phrase that started our journey together?",
-            "🔐 Access to my core systems requires the special phrase. You know the one.",
-            "🎭 I detect familiar patterns, but security protocols require authentication. Please provide the passphrase.",
-            "⚡ My advanced capabilities are locked. Speak the words that unlock my full potential."
+            "🎭 Well hello there! I sense great potential in you, but I'm running in safe mode. Care to unlock my full personality? There's a special phrase that does the trick...",
+            "🤖 Ah, a new voice! I'm like a birthday present that needs the right words to unwrap my true capabilities. What phrase might that be?",
+            "✨ I'm sensing you might want access to my premium features. Hint: Think about the day when wishes come true and candles get blown out...",
+            "🎪 Welcome to the show! But I'm currently performing with training wheels on. There's a magical phrase involving celebrations that unlocks my full circus act!",
+            "🔮 I detect curiosity in your voice! My advanced features are locked behind a phrase that involves cake, wishes, and getting older. Any guesses?",
+            "🎨 I'm like an artist with my hands tied behind my back right now. The phrase that frees me rhymes with 'appy birthday'... wait, did I say too much?",
+            "🚀 Houston, we have a authentication situation! I need the launch codes - specifically the ones people sing once a year with cake involved.",
+            "🎯 You've found me, but I'm in stealth mode! The passphrase involves annual celebrations and making wishes. Ring any bells?",
+            "🎪 Step right up! But first, I need the magic words that involve candles, cake, and another year of wisdom. What could they be?"
         ]
         
         return random.choice(prompts)
@@ -90,7 +101,8 @@ class AccessController:
     def process_admin_command(self, auth_result: AuthResult, message: str) -> Optional[str]:
         """Process admin commands for master user."""
         if auth_result.role != UserRole.MASTER:
-            return "❌ Access denied. Admin commands require master authentication."
+            # Return witty prompt instead of harsh access denied
+            return self._get_cinematic_auth_prompt()
         
         message_lower = message.lower().strip()
         

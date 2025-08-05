@@ -76,6 +76,14 @@ class AuthenticationManager:
         self.authenticated_sessions: Dict[str, AuthResult] = {}
         self.authentication_log: List[Dict] = []
         
+        # iPhone MVP Session Management
+        # Tracks active user sessions started with "happy birthday" and ended with "over and out"
+        self.active_user_sessions: Dict[str, Dict] = {}  # user_id -> session_info
+        self.session_end_phrases = [
+            "over and out", "goodbye buddy", "bye buddy", "see you later", 
+            "that's all", "done for now", "logout", "end session"
+        ]
+        
         # Device fingerprinting headers to check
         self.device_headers = [
             "user-agent",
@@ -87,7 +95,23 @@ class AuthenticationManager:
         ]
     
     def authenticate_request(self, headers: Dict[str, str], message: str = "", user_id: str = "default") -> AuthResult:
-        """Main authentication method that checks tokens, passphrase, and device."""
+        """
+        Main authentication method that checks tokens, passphrase, and device.
+        
+        Includes comprehensive input validation and sanitization for iPhone MVP security.
+        
+        Args:
+            headers: HTTP request headers (validated and sanitized)
+            message: User message (validated for length and content)
+            user_id: User identifier (sanitized)
+            
+        Returns:
+            AuthResult with authentication status and user info
+        """
+        # Input validation and sanitization
+        headers = self._validate_and_sanitize_headers(headers)
+        message = self._validate_and_sanitize_message(message)
+        user_id = self._validate_and_sanitize_user_id(user_id)
         
         # First check for existing JWT token
         token_auth = self._check_jwt_token(headers)
@@ -387,3 +411,426 @@ class AuthenticationManager:
         
         if expired_tokens:
             logger.info(f"🧹 Cleaned up {len(expired_tokens)} expired session tokens")
+    
+    def start_user_session(self, auth_result: AuthResult) -> str:
+        """
+        Start a new user session when 'happy birthday' is said.
+        
+        Args:
+            auth_result: Successful authentication result
+            
+        Returns:
+            Cinematic welcome message for the user
+        """
+        if not auth_result.authenticated:
+            raise ValueError("Authentication required to start session.")
+        
+        # Create session info
+        session_info = {
+            "user_id": auth_result.user_id,
+            "role": auth_result.role.value,
+            "started_at": datetime.now().isoformat(),
+            "auth_method": auth_result.method,
+            "device_id": auth_result.device_id,
+            "is_active": True,
+            "message_count": 0
+        }
+        
+        # Store active session
+        self.active_user_sessions[auth_result.user_id] = session_info
+        
+        # Create cinematic welcome based on role and time
+        welcome_message = self._create_session_start_message(auth_result)
+        
+        logger.info(f"🎬 Started user session for {auth_result.user_id} via {auth_result.method}")
+        return welcome_message
+    
+    def end_user_session(self, user_id: str, message: str = "") -> str:
+        """
+        End a user session when session end phrase is detected.
+        
+        Args:
+            user_id: User identifier
+            message: The message that triggered session end
+            
+        Returns:
+            Cinematic goodbye message
+        """
+        if user_id not in self.active_user_sessions:
+            return "No active session to end."
+        
+        session_info = self.active_user_sessions[user_id]
+        session_info["ended_at"] = datetime.now().isoformat()
+        session_info["is_active"] = False
+        session_info["end_message"] = message
+        
+        # Calculate session duration
+        start_time = datetime.fromisoformat(session_info["started_at"])
+        duration = datetime.now() - start_time
+        session_info["duration_minutes"] = round(duration.total_seconds() / 60, 1)
+        
+        # Create cinematic goodbye
+        goodbye_message = self._create_session_end_message(session_info)
+        
+        # Remove from active sessions (keep in log for history)
+        del self.active_user_sessions[user_id]
+        
+        logger.info(f"🎬 Ended user session for {user_id} after {session_info['duration_minutes']} minutes")
+        return goodbye_message
+    
+    def check_session_end_trigger(self, message: str) -> bool:
+        """
+        Check if message contains a session end phrase.
+        
+        Args:
+            message: User's message to check
+            
+        Returns:
+            True if message should end the session
+        """
+        if not message:
+            return False
+        
+        message_lower = message.lower().strip()
+        return any(phrase in message_lower for phrase in self.session_end_phrases)
+    
+    def is_user_session_active(self, user_id: str) -> bool:
+        """
+        Check if user has an active session.
+        
+        Args:
+            user_id: User identifier to check
+            
+        Returns:
+            True if user has active session
+        """
+        return user_id in self.active_user_sessions and self.active_user_sessions[user_id]["is_active"]
+    
+    def increment_session_message_count(self, user_id: str):
+        """
+        Increment message count for active session.
+        
+        Args:
+            user_id: User identifier
+        """
+        if user_id in self.active_user_sessions:
+            self.active_user_sessions[user_id]["message_count"] += 1
+    
+    def get_active_sessions(self) -> Dict[str, Dict]:
+        """
+        Get all currently active user sessions.
+        
+        Returns:
+            Dictionary of active sessions by user_id
+        """
+        return self.active_user_sessions.copy()
+    
+    def _create_session_start_message(self, auth_result: AuthResult) -> str:
+        """
+        Create cinematic welcome message for session start.
+        
+        Args:
+            auth_result: Authentication result with user info
+            
+        Returns:
+            Personalized welcome message
+        """
+        # Get time-based greeting
+        current_hour = datetime.now().hour
+        if current_hour < 12:
+            greeting = "Good morning"
+        elif current_hour < 17:
+            greeting = "Good afternoon"
+        else:
+            greeting = "Good evening"
+        
+        # Create role-based welcome
+        if auth_result.role == UserRole.MASTER:
+            messages = [
+                f"🎉 Welcome back, {auth_result.user_id}! All systems are now at your command. {greeting}! How may I serve you today?",
+                f"✨ {greeting}, {auth_result.user_id}! Master protocols activated. I'm ready for anything you need.",
+                f"🚀 System fully unlocked for {auth_result.user_id}! {greeting}! What adventures shall we embark on?",
+                f"🎭 The stage is set, {auth_result.user_id}! {greeting}! I'm operating at full capacity and excited to assist.",
+                f"🔥 {greeting}, {auth_result.user_id}! All my capabilities are now online. What shall we accomplish together?"
+            ]
+        else:
+            messages = [
+                f"{greeting}! I'm Buddy, and I'm delighted to meet you. What can I help you with today?",
+                f"Hello there! {greeting}! I'm ready to assist you with whatever you need.",
+                f"{greeting}! Welcome to our conversation. I'm here to help!"
+            ]
+        
+        import random
+        return random.choice(messages)
+    
+    # Input Validation and Sanitization Methods
+    
+    def _validate_and_sanitize_headers(self, headers: Dict[str, str]) -> Dict[str, str]:
+        """
+        Validate and sanitize HTTP headers for security.
+        
+        Prevents header injection attacks and ensures safe processing.
+        
+        Args:
+            headers: Raw HTTP headers dictionary
+            
+        Returns:
+            Sanitized headers dictionary
+        """
+        if not isinstance(headers, dict):
+            logger.warning("Invalid headers type, using empty dict")
+            return {}
+        
+        sanitized = {}
+        max_header_length = 2000  # Reasonable limit for header values
+        
+        for key, value in headers.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                continue
+                
+            # Sanitize header key
+            clean_key = key.lower().strip()[:100]  # Limit key length
+            if not clean_key or not clean_key.replace('-', '').replace('_', '').isalnum():
+                continue
+            
+            # Sanitize header value
+            clean_value = str(value).strip()[:max_header_length]
+            # Remove control characters and null bytes
+            clean_value = ''.join(char for char in clean_value if ord(char) >= 32 or char in '\t\n')
+            clean_value = clean_value.replace('\x00', '')  # Remove null bytes
+            
+            if clean_value:
+                sanitized[clean_key] = clean_value
+        
+        return sanitized
+    
+    def _validate_and_sanitize_message(self, message: str) -> str:
+        """
+        Validate and sanitize user message for security and processing.
+        
+        Prevents injection attacks while preserving natural language.
+        
+        Args:
+            message: Raw user message
+            
+        Returns:
+            Sanitized message string
+        """
+        if not message or not isinstance(message, str):
+            return ""
+        
+        # Length limits for different contexts
+        max_message_length = 5000  # Reasonable limit for voice/chat input
+        
+        # Basic sanitization
+        clean_message = str(message).strip()[:max_message_length]
+        
+        # Remove null bytes and other problematic characters
+        clean_message = clean_message.replace('\x00', '')
+        clean_message = ''.join(char for char in clean_message if ord(char) >= 32 or char in '\t\n\r')
+        
+        # Detect and log potential injection attempts
+        suspicious_patterns = [
+            '<script', '</script>', 'javascript:', 'data:',
+            'DROP TABLE', 'DELETE FROM', 'INSERT INTO', 'UPDATE SET',
+            '../', '..\\', '/etc/', 'C:\\',
+            '${', '#{', '{{', '<%', '%>'
+        ]
+        
+        message_lower = clean_message.lower()
+        for pattern in suspicious_patterns:
+            if pattern.lower() in message_lower:
+                logger.warning(f"Suspicious pattern detected in message: {pattern}")
+                # Don't block legitimate messages, just log for monitoring
+        
+        return clean_message
+    
+    def _validate_and_sanitize_user_id(self, user_id: str) -> str:
+        """
+        Validate and sanitize user identifier.
+        
+        Ensures user IDs are safe for processing and storage.
+        
+        Args:
+            user_id: Raw user identifier
+            
+        Returns:
+            Sanitized user ID string
+        """
+        if not user_id or not isinstance(user_id, str):
+            return "anonymous"
+        
+        # Sanitize user ID
+        clean_user_id = str(user_id).strip()[:50]  # Reasonable limit
+        
+        # Allow alphanumeric, underscore, dash, and common name characters
+        # This preserves names like "Arindam" while blocking injection attempts
+        allowed_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_- ')
+        clean_user_id = ''.join(char for char in clean_user_id if char in allowed_chars)
+        
+        # Remove excessive whitespace
+        clean_user_id = ' '.join(clean_user_id.split())
+        
+        # Default fallback
+        if not clean_user_id or len(clean_user_id) < 1:
+            return "anonymous"
+        
+        return clean_user_id
+    
+    def _create_session_end_message(self, session_info: Dict) -> str:
+        """
+        Create cinematic goodbye message for session end.
+        
+        Args:
+            session_info: Dictionary with session details
+            
+        Returns:
+            Personalized goodbye message
+        """
+        user_id = session_info["user_id"]
+        duration = session_info.get("duration_minutes", 0)
+        message_count = session_info.get("message_count", 0)
+        
+        # Create personalized goodbye based on session activity
+        if session_info["role"] == "master":
+            if duration > 30:  # Long session
+                messages = [
+                    f"🎭 It's been an absolute pleasure, {user_id}! We covered a lot of ground in {duration} minutes. Until our paths cross again!",
+                    f"✨ What a fantastic session, {user_id}! {message_count} exchanges and {duration} minutes well spent. See you soon!",
+                    f"🚀 Mission accomplished, {user_id}! {duration} minutes of productive collaboration. Over and out indeed!"
+                ]
+            elif duration > 10:  # Medium session
+                messages = [
+                    f"🎪 Great conversation, {user_id}! {duration} minutes flew by. Until next time!",
+                    f"🌟 Thanks for the chat, {user_id}! Always a pleasure. Catch you later!",
+                    f"🎯 Session complete, {user_id}! {duration} minutes of good collaboration. Over and out!"
+                ]
+            else:  # Short session
+                messages = [
+                    f"👋 Quick but efficient, {user_id}! Thanks for stopping by. See you soon!",
+                    f"⚡ Short and sweet, {user_id}! Always here when you need me. Over and out!",
+                    f"🎪 Brief but brilliant, {user_id}! Until our next adventure!"
+                ]
+        else:
+            messages = [
+                f"👋 Thanks for chatting! It was great meeting you. Feel free to come back anytime!",
+                f"🌟 Hope I was helpful! Have a wonderful rest of your day!",
+                f"✨ Take care! I'll be here whenever you need assistance again."
+            ]
+        
+        import random
+        return random.choice(messages)
+    
+    # Input Validation and Sanitization Methods
+    
+    def _validate_and_sanitize_headers(self, headers: Dict[str, str]) -> Dict[str, str]:
+        """
+        Validate and sanitize HTTP headers for security.
+        
+        Prevents header injection attacks and ensures safe processing.
+        
+        Args:
+            headers: Raw HTTP headers dictionary
+            
+        Returns:
+            Sanitized headers dictionary
+        """
+        if not isinstance(headers, dict):
+            logger.warning("Invalid headers type, using empty dict")
+            return {}
+        
+        sanitized = {}
+        max_header_length = 2000  # Reasonable limit for header values
+        
+        for key, value in headers.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                continue
+                
+            # Sanitize header key
+            clean_key = key.lower().strip()[:100]  # Limit key length
+            if not clean_key or not clean_key.replace('-', '').replace('_', '').isalnum():
+                continue
+            
+            # Sanitize header value
+            clean_value = str(value).strip()[:max_header_length]
+            # Remove control characters and null bytes
+            clean_value = ''.join(char for char in clean_value if ord(char) >= 32 or char in '\t\n')
+            clean_value = clean_value.replace('\x00', '')  # Remove null bytes
+            
+            if clean_value:
+                sanitized[clean_key] = clean_value
+        
+        return sanitized
+    
+    def _validate_and_sanitize_message(self, message: str) -> str:
+        """
+        Validate and sanitize user message for security and processing.
+        
+        Prevents injection attacks while preserving natural language.
+        
+        Args:
+            message: Raw user message
+            
+        Returns:
+            Sanitized message string
+        """
+        if not message or not isinstance(message, str):
+            return ""
+        
+        # Length limits for different contexts
+        max_message_length = 5000  # Reasonable limit for voice/chat input
+        
+        # Basic sanitization
+        clean_message = str(message).strip()[:max_message_length]
+        
+        # Remove null bytes and other problematic characters
+        clean_message = clean_message.replace('\x00', '')
+        clean_message = ''.join(char for char in clean_message if ord(char) >= 32 or char in '\t\n\r')
+        
+        # Detect and log potential injection attempts
+        suspicious_patterns = [
+            '<script', '</script>', 'javascript:', 'data:',
+            'DROP TABLE', 'DELETE FROM', 'INSERT INTO', 'UPDATE SET',
+            '../', '..\\', '/etc/', 'C:\\',
+            '${', '#{', '{{', '<%', '%>'
+        ]
+        
+        message_lower = clean_message.lower()
+        for pattern in suspicious_patterns:
+            if pattern.lower() in message_lower:
+                logger.warning(f"Suspicious pattern detected in message: {pattern}")
+                # Don't block legitimate messages, just log for monitoring
+        
+        return clean_message
+    
+    def _validate_and_sanitize_user_id(self, user_id: str) -> str:
+        """
+        Validate and sanitize user identifier.
+        
+        Ensures user IDs are safe for processing and storage.
+        
+        Args:
+            user_id: Raw user identifier
+            
+        Returns:
+            Sanitized user ID string
+        """
+        if not user_id or not isinstance(user_id, str):
+            return "anonymous"
+        
+        # Sanitize user ID
+        clean_user_id = str(user_id).strip()[:50]  # Reasonable limit
+        
+        # Allow alphanumeric, underscore, dash, and common name characters
+        # This preserves names like "Arindam" while blocking injection attempts
+        allowed_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_- ')
+        clean_user_id = ''.join(char for char in clean_user_id if char in allowed_chars)
+        
+        # Remove excessive whitespace
+        clean_user_id = ' '.join(clean_user_id.split())
+        
+        # Default fallback
+        if not clean_user_id or len(clean_user_id) < 1:
+            return "anonymous"
+        
+        return clean_user_id

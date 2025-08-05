@@ -15,7 +15,15 @@
       "Bash(lsof:*)",
       "Bash(nc:*)",
       "Bash(sudo:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(brew install:*)",
+      "Bash(ngrok version)",
+      "Bash(brew list:*)",
+      "Bash(chmod:*)",
+      "Bash(~/bin/ngrok config add-authtoken 30qffeieyX5UabEVEN2u6bHxLyM_7uMipL94jvAcV21gHv5fK)",
+      "Bash(./setup_ngrok.sh:*)",
+      "Bash(true)"
     ],
     "deny": []
   }
