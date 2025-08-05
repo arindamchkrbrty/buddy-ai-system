@@ -290,7 +290,8 @@ async def siri_chat(request: ChatRequest, http_request: Request):
     """
     try:
         # STEP 1: Get or create session state
-        session_id = f"{request.user_id}_{http_request.client.host if http_request.client else 'unknown'}"
+        # Use simpler session ID for consistency across requests
+        session_id = f"session_{request.user_id}"
         
         if session_id not in active_sessions:
             active_sessions[session_id] = SessionState(request.user_id)
@@ -360,13 +361,13 @@ async def siri_chat(request: ChatRequest, http_request: Request):
             headers = dict(http_request.headers)
             
             # Create auth result for buddy processing
-            from auth.models import AuthResult, UserRole
+            from auth.authentication import AuthResult, UserRole
             auth_result = AuthResult(
                 authenticated=True,
                 user_id=session.user_id,
                 role=UserRole.MASTER,
                 method="session_active",
-                device_info=headers.get('user-agent', 'Unknown')
+                device_id=headers.get('user-agent', 'Unknown')
             )
             
             # Process message through Buddy
